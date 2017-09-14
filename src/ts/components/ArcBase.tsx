@@ -1,0 +1,186 @@
+import { Promise } from 'es6-promise';
+import { esriPromise } from 'esri-promise';
+import * as React from 'react';
+import ArcContainer from './ArcContainer';
+
+export interface BaseProps {
+    id?: string;
+    children?: any;
+    className?: string;
+    dataFlow?: 'oneWay' | 'oneTime';
+    style?: {
+        [propName: string]: any
+    };
+    mapProperties?: __esri.MapProperties;
+    viewProperties?: __esri.MapViewProperties | __esri.SceneViewProperties;
+    onClick?: (e: EventProperties) => any;
+    onDoubleClick?: (e: EventProperties) => any;
+    onDrag?: (e: EventProperties) => any;
+    onHold?: (e: EventProperties) => any;
+    onKeyDown?: (e: EventProperties) => any;
+    onKeyUp?: (e: EventProperties) => any;
+    onLayerViewCreate?: (e: EventProperties) => any;
+    onLayerViewDestroy?: (e: EventProperties) => any;
+    onMouseWheel?: (e: EventProperties) => any;
+    onPointerDown?: (e: EventProperties) => any;
+    onPointerMove?: (e: EventProperties) => any;
+    onPointerUp?: (e: EventProperties) => any;
+    onResize?: (e: EventProperties) => any;
+    onLoad?: (map: __esri.Map, view: __esri.MapView | __esri.SceneView) => any;
+    onFail?: (e: any) => any;
+    loadComponent?: any;
+    failComponent?: any;
+}
+
+interface ArcProps extends BaseProps {
+    dataFlow: 'oneWay' | 'oneTime';
+    loadMap: (modules: any[], containerId: string) => Promise<any>;
+    userDefinedMapProperties: UserDefinedMapProperties;
+    userDefinedViewProperties: UserDefinedViewProperties;
+    scriptUri: string[];
+}
+
+interface UserDefinedMapProperties extends __esri.MapProperties {
+    [index: string]: any;
+}
+
+interface UserDefinedViewProperties extends __esri.ViewProperties {
+    [index: string]: any;
+}
+
+interface EventProperties {
+    [propName: string]: any;
+}
+
+
+interface ComponentState {
+    map?: __esri.Map;
+    mapContainerId: string;
+    mapProperties?: __esri.MapProperties;
+    view?: __esri.MapView | __esri.SceneView;
+    viewProperties?: __esri.MapViewProperties | __esri.SceneViewProperties;
+    status: string;
+}
+
+const eventMap = {
+    onClick: 'click',
+    onDoubleClick: 'double-click',
+    onDrag: 'drag',
+    onHold: 'hold',
+    onKeyDown: 'key-down',
+    onKeyUp: 'key-up',
+    onLayerViewCreate: 'layerview-create',
+    onLayerViewDestroy: 'layerview-destroy',
+    onMouseWheel: 'mouse-wheel',
+    onPointerDown: 'pointer-down',
+    onPointerMove: 'pointer-move',
+    onPointerUp: 'pointer-up',
+    onResize: 'resize'
+};
+
+export class ArcView extends React.Component<ArcProps, ComponentState> {
+    constructor(props: ArcProps) {
+        super(props);
+        this.state = {
+            mapContainerId: Math.random().toString(36).substring(0, 14),
+            mapProperties: props.mapProperties,
+            status: 'loading',
+            viewProperties: props.viewProperties
+        };
+    }
+
+    public render() {
+        const centerStyle = {
+            left: '50%',
+            marginRight: '-50%',
+            position: 'absolute',
+            top: '50%',
+            transform: 'translate(-50%, -50%)'
+        };
+        const mapStyle = this.props.className ? this.props.style : { position: 'relative', width: '100%', height: '100%', ...this.props.style };
+        const className = this.props.className ? this.props.className : "";
+        const loadElement = (this.props.loadComponent ? this.props.loadComponent : <h3 id="react-arcgis-loading-text" style={centerStyle as any}>Loading..</h3>);
+        const failElement = (
+            this.props.failComponent ? <this.props.failComponent /> :
+            <h3 id="react-arcgis-fail-text" style={centerStyle as any}>The ArcGIS API failed to load.</h3>
+        );
+        if (this.state.status === 'loaded') {
+            const childrenWithProps = React.Children.map(this.props.children, (child) => {
+                const childEl = child as React.ReactElement<any>;
+                return React.cloneElement(childEl, {
+                        map: this.state.map,
+                        view: this.state.view
+                    }
+                );
+            });
+            return (
+                <div id="base-container" style={mapStyle} className={className}>
+                    <ArcContainer id={this.state.mapContainerId} style={{ width: '100%', height: '100%' }} />
+                    {childrenWithProps}
+                </div>
+            );
+        } else if (this.state.status === 'loading') {
+            return (
+                <div id="base-container" style={mapStyle} className={className}>
+                    <ArcContainer id={this.state.mapContainerId} style={{ width: '100%', height: '100%' }} />
+                    {loadElement}
+                </div>
+            );
+        }
+        return (
+            <div id="base-container" style={mapStyle} className={className}>
+                {failElement}
+            </div>
+        );
+    }
+
+    public componentDidMount() {
+        esriPromise(this.props.scriptUri)
+        .then((modules) => (
+            this.props.loadMap(modules, this.state.mapContainerId)
+                .then(
+                    ({ map, view }) => {
+                        this.setState({
+                            map,
+                            view,
+                            status: 'loaded'
+                        });
+                        if (this.props.onLoad) {
+                            this.props.onLoad(map, view);
+                        }
+                    })
+                .catch((e) => {
+                    throw e;
+                })
+        )).catch((e) => {
+            this.setState({ status: 'failed' });
+            if (this.props.onFail) {
+                this.props.onFail(e);
+            }
+        });
+    }
+
+    public componentWillReceiveProps(nextProps: ArcProps) {
+        if (this.props.dataFlow === 'oneWay') {
+            Object.keys(nextProps.userDefinedMapProperties).forEach((key: string) => {
+                if (
+                    this.state.map && this.state.map.get(key)
+                    && this.state.map.get(key) !== nextProps.userDefinedMapProperties[key]
+                ) {
+                    this.state.map.set(key, nextProps.userDefinedMapProperties[key]);
+                }
+            });
+            Object.keys(nextProps.userDefinedViewProperties).forEach((key: string) => {
+                if (
+                    this.state.view &&
+                    this.state.view.get(key) &&
+                    this.state.view.get(key) !== nextProps.userDefinedViewProperties[key]
+                ) {
+                    const changes: any = {};
+                    changes[key] = nextProps.userDefinedViewProperties[key];
+                    this.state.view.set(changes);
+                }
+            });
+        }
+    }
+}
